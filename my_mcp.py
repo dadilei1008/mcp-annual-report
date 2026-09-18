@@ -1,37 +1,62 @@
 from fastmcp import FastMCP
 import requests
 
-mcp = FastMCP("my-mcp-service")
+mcp = FastMCP("cninfo-annual-report-mcp")
+
+CNINFO_URL = "https://www.cninfo.com.cn/new/hisAnnouncement/query"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Referer": "https://www.cninfo.com.cn/new/disclosure/overview",
+}
 
 @mcp.tool()
-def search_annual_report(stock_code: str, year: int) -> str:
-    """查询A股年报公告（示意）"""
-    return f"模拟：已定位 {stock_code} {year} 年年报公告（需接入真实数据源）"
+def search_annual_report(stock_code: str, year: int, exchange: str = "sse") -> str:
+    """查A股年度报告。exchange: sse=上交所, szse=深交所, bse=北交所"""
+    data = {
+        "pageNum": 1,
+        "pageSize": 5,
+        "tabName": "fulltext",
+        "column": exchange,
+        "stock": stock_code,
+        "category": "category_ndbg_szsh",
+        "seDate": f"{year}-01-01~{year}-12-31",
+        "sortName": "time",
+        "sortType": "desc",
+    }
+    try:
+        r = requests.post(CNINFO_URL, headers=HEADERS, data=data, timeout=10)
+        r.raise_for_status()
+        items = r.json().get("announcements") or []
+        if not items:
+            return f"未找到 {stock_code} {year} 年年度报告"
+        return "\n\n".join(
+            f"{a.get('announcementTime')} | {a.get('announcementTitle')}\nhttps://static.cninfo.com.cn/{a.get('adjunctUrl','')}"
+            for a in items
+        )
+    except Exception as e:
+        return f"查询失败：{e}"
 
 @mcp.tool()
-def extract_financial_ratios(stock_code: str, year: int) -> str:
-    """抽取核心财务指标"""
-    return (
-        f"{stock_code} {year} 财务示意："
-        "经营现金流、资产负债率、ROE、毛利率。"
-    )
-
-@mcp.tool()
-def fraud_risk_check(stock_code: str, year: int) -> str:
-    """简易财务舞弊风险检查。"""
-    report = search_annual_report(stock_code, year)
-    if "未找到" in report or "失败" in report:
-        return report
-    risk_points = [
-        "年报是否披露内部控制审计意见",
-        "是否发生会计师事务所变更",
-        "营收与经营现金流是否背离",
-        "关联交易披露完整性",
-    ]
-    return (
-        f"【{stock_code} {year} 舞弊风险初筛】\n"
-        f"当前规则待办：\n- " + "\n- ".join(risk_points)
-    )
-
-if __name__ == "__main__":
-    mcp.run(transport="http", host="0.0.0.0", port=8000)
+def search_notices(stock_code: str, keyword: str = "年度报告", limit: int = 5) -> str:
+    """按关键词查巨潮历史公告：季报/半年报/处罚/重组等"""
+    data = {
+        "pageNum": 1,
+        "pageSize": limit,
+        "tabName": "fulltext",
+        "stock": stock_code,
+        "searchkey": keyword,
+        "sortName": "time",
+        "sortType": "desc",
+    }
+    try:
+        r = requests.post(CNINFO_URL, headers=HEADERS, data=data, timeout=10)
+        r.raise_for_status()
+        items = r.json().get("announcements") or []
+        if not items:
+            return f"未找到 {stock_code} 含「{keyword}」的公告"
+        return "\n\n".join(
+            f"{a.get('announcementTime')} | {a.get('announcementTitle')}\nhttps://static.cninfo.com.cn/{a.get('adjunctUrl','')}"
+            for a in items
+        )
+    except Exception as e:
+        return f"查询失败：{e}"
